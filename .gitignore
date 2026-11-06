@@ -73,3 +73,11 @@ Plugins/**/Intermediate/*
 
 # Cache files for the editor to use
 DerivedDataCache/*
+
+# Project-local packaged builds and backup copies
+/Builds/
+/Backup/
+
+# Generated Visual Studio solution files and upgrade report
+*.slnx
+/UpgradeLog.htm

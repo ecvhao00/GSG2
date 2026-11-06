@@ -1,0 +1,18 @@
+{
+  "map": "/Game/LastBroadcast/Maps/L_LastBroadcast",
+  "static_mesh_actors": 285,
+  "total_actors": 371,
+  "rooms": 8,
+  "doors": 14,
+  "zones": [
+    "Z01",
+    "Z02",
+    "Z03"
+  ],
+  "prototype_puzzles": [
+    "P01",
+    "MID_A",
+    "MID_B"
+  ],
+  "intro_seconds": 13.0
+}
