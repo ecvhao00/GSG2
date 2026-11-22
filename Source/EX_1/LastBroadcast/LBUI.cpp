@@ -8,6 +8,7 @@
 #include "Fonts/CompositeFont.h"
 #include "UnrealClient.h"
 #include "HAL/FileManager.h"
+#include "GameFramework/PlayerInput.h"
 
 ALBDirector* ALBController::Director() const {if(const auto* P=Cast<ALBPlayer>(GetPawn()))return P->Director;return nullptr;}
 void ALBController::SetupInputComponent()
@@ -16,7 +17,12 @@ void ALBController::SetupInputComponent()
     InputComponent->BindKey(EKeys::Escape,IE_Pressed,this,&ALBController::EscapeKey).bExecuteWhenPaused=true;
     InputComponent->BindKey(EKeys::Enter,IE_Pressed,this,&ALBController::EnterKey).bExecuteWhenPaused=true;
     InputComponent->BindKey(EKeys::SpaceBar,IE_Pressed,this,&ALBController::SpaceKey).bExecuteWhenPaused=true;
+#if !UE_BUILD_SHIPPING
+    // Engine screenshot exec bindings otherwise consume F9 before this input component.
+    if(PlayerInput)PlayerInput->DebugExecBindings.RemoveAll([](const FKeyBind& Binding){return Binding.Key==EKeys::F9;});
     InputComponent->BindKey(EKeys::F8,IE_Pressed,this,&ALBController::DebugKey).bExecuteWhenPaused=true;
+    InputComponent->BindKey(EKeys::F9,IE_Pressed,this,&ALBController::EnemyDebugKey).bExecuteWhenPaused=true;
+#endif
 }
 void ALBController::EscapeKey(){if(auto* D=Director())D->PauseMenu();}
 void ALBController::EnterKey()
@@ -39,7 +45,23 @@ void ALBController::DebugKey()
 }
 void ALBController::LBStatus()
 {
-    if(auto* D=Director())UE_LOG(LogTemp,Display,TEXT("LB_STATUS stage=%s power=%d exit=%d solved=%d cooldown=%.3f progress=%.3f enemy=%s"),*UEnum::GetValueAsString(D->Stage),D->bPower,D->bExit,D->Solved.Num(),D->Cooldown,D->UnlockProgress,D->Enemy?*UEnum::GetValueAsString(D->Enemy->State):TEXT("none"));
+    if(auto* D=Director())UE_LOG(LogTemp,Display,TEXT("LB_STATUS stage=%s power=%d exit=%d solved=%d cooldown=%.3f progress=%.3f enemy_enabled=%d enemy=%s"),*UEnum::GetValueAsString(D->Stage),D->bPower,D->bExit,D->Solved.Num(),D->Cooldown,D->UnlockProgress,D->IsDebugEnemyEnabled(),D->Enemy?*UEnum::GetValueAsString(D->Enemy->State):TEXT("none"));
+}
+void ALBController::EnemyDebugKey()
+{
+#if !UE_BUILD_SHIPPING
+    if(auto* D=Director())if(D->bDebug)D->SetDebugEnemyEnabled(!D->IsDebugEnemyEnabled());
+#endif
+}
+void ALBController::LBEnemy(int32 Enabled)
+{
+#if !UE_BUILD_SHIPPING
+    if(auto* D=Director())
+    {
+        if(Enabled!=0&&Enabled!=1){D->Notify(TEXT("사용법: LBEnemy 0 (끄기) / LBEnemy 1 (켜기)"));return;}
+        D->SetDebugEnemyEnabled(Enabled==1);
+    }
+#endif
 }
 void ALBController::LBTest()
 {
@@ -214,11 +236,18 @@ void ALBHUD::DrawHUD()
 #if !UE_BUILD_SHIPPING
     if(D->bDebug)
     {
-        Rect(W-510,H-160,495,140,FLinearColor(0,0,0,.9f));
-        Text(UEnum::GetValueAsString(D->Stage),W-495,H-147,14,Green);
-        Text(FString::Printf(TEXT("PWR %d  EXIT %d  SOLVED %d  CD %.2f"),D->bPower,D->bExit,D->Solved.Num(),D->Cooldown),W-495,H-119,14);
-        Text(D->Enemy?UEnum::GetValueAsString(D->Enemy->State):TEXT("No enemy"),W-495,H-91,14);
-        Text(TEXT("F8 숨기기 · 콘솔 LBStatus / LBSolve / LBTeleport"),W-495,H-60,12,Muted);
+        Rect(W-510,H-200,495,180,FLinearColor(0,0,0,.9f));
+        Text(UEnum::GetValueAsString(D->Stage),W-495,H-187,14,Green);
+        Text(FString::Printf(TEXT("PWR %d  EXIT %d  SOLVED %d  CD %.2f"),D->bPower,D->bExit,D->Solved.Num(),D->Cooldown),W-495,H-159,14);
+        Text(D->IsDebugEnemyEnabled()?TEXT("적 ON  [F9 끄기]"):TEXT("적 OFF  [F9 켜기]"),W-495,H-131,18,D->IsDebugEnemyEnabled()?Green:FLinearColor(1,.45f,.2f));
+        Text(D->Enemy?UEnum::GetValueAsString(D->Enemy->State):TEXT("No enemy"),W-495,H-99,14);
+        Text(TEXT("F8 숨기기 · 콘솔 LBEnemy 0 / LBEnemy 1"),W-495,H-67,12,Muted);
+        Text(TEXT("적 재활성화 시 1초 유예 · 체크포인트 재시작에도 설정 유지"),W-495,H-44,12,Muted);
+    }
+    else if(!D->IsDebugEnemyEnabled())
+    {
+        Rect(W-300,24,275,42,FLinearColor(0,0,0,.9f));
+        Text(TEXT("DEBUG · 적 OFF  [F8 설정]"),W-285,34,16,FLinearColor(1,.45f,.2f));
     }
 #endif
 }

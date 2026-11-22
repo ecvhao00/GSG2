@@ -62,7 +62,40 @@ bool ALBDirector::IsGameplay() const
 }
 bool ALBDirector::IsEnemyActive() const
 {
-    return Enemy&&Player&&IsGameplay()&&(Stage==ELBStage::Objectives||Stage==ELBStage::Ready||Stage==ELBStage::Unlocking||Stage==ELBStage::Escape);
+    return IsDebugEnemyEnabled()&&Enemy&&Player&&IsGameplay()&&(Stage==ELBStage::Objectives||Stage==ELBStage::Ready||Stage==ELBStage::Unlocking||Stage==ELBStage::Escape);
+}
+bool ALBDirector::IsDebugEnemyEnabled() const
+{
+#if UE_BUILD_SHIPPING
+    return true;
+#else
+    return !bDebugEnemyDisabled;
+#endif
+}
+void ALBDirector::SetDebugEnemyEnabled(bool bEnabled)
+{
+#if !UE_BUILD_SHIPPING
+    if(!bDebug){Notify(TEXT("먼저 F8로 디버그 모드를 켜세요。"));return;}
+    if(bEnabled==IsDebugEnemyEnabled())return;
+    bDebugEnemyDisabled=!bEnabled;
+    for(auto Voice:EnemyAudioVoices)if(Voice.IsValid())Voice->Stop();
+    EnemyAudioVoices.Reset();
+    const bool bCanResume=bEnabled&&bPower&&!bCaptured&&!bSucceeded&&
+        (Stage==ELBStage::Objectives||Stage==ELBStage::Ready||Stage==ELBStage::Unlocking||Stage==ELBStage::Escape);
+    if(Enemy)
+    {
+        // Keep the current position, but discard stale paths and sound targets.
+        Enemy->ResetEnemy(Enemy->GetActorTransform(),bCanResume?ELBEnemyState::Patrol:ELBEnemyState::Inactive);
+        if(bEnabled&&Stage==ELBStage::PowerReveal)Enemy->SetActorHiddenInGame(false);
+        if(bCanResume)
+        {
+            Grace=FMath::Max(Grace,1.f);
+            if(Stage==ELBStage::Escape&&bExit)Enemy->BeginFinalChase();
+        }
+    }
+    Notify(bEnabled?TEXT("[DEBUG] 적 ON · 재개 시 1초 유예"):TEXT("[DEBUG] 적 OFF · 게임 진행 테스트 중"),4);
+    UE_LOG(LogTemp,Display,TEXT("LB_DEBUG_ENEMY enabled=%d stage=%s"),bEnabled,*UEnum::GetValueAsString(Stage));
+#endif
 }
 void ALBDirector::SetStage(ELBStage NewStage)
 {
@@ -90,6 +123,7 @@ void ALBDirector::ResetAudio()
 {
     for(auto Voice:AudioVoices)if(Voice.IsValid())Voice->Stop();
     AudioVoices.Reset();RadioAudio=nullptr;AmbientAudio=nullptr;
+    EnemyAudioVoices.Reset();
     RadioRemaining=0;PlayingZone=NAME_None;
 }
 void ALBDirector::PlaySound(USoundBase* Sound,FVector Position,float Volume,bool bSpatial)
@@ -97,6 +131,14 @@ void ALBDirector::PlaySound(USoundBase* Sound,FVector Position,float Volume,bool
     if(!Sound||bTestMode||!Preferences)return;
     UAudioComponent* Voice=bSpatial?UGameplayStatics::SpawnSoundAtLocation(this,Sound,Position,FRotator::ZeroRotator,Volume*Preferences->Volume):UGameplayStatics::SpawnSound2D(this,Sound,Volume*Preferences->Volume);
     if(Voice) AudioVoices.Add(Voice);
+}
+void ALBDirector::PlayEnemySound(USoundBase* Sound,FVector Position,float Volume,bool bSpatial)
+{
+    if(!IsDebugEnemyEnabled())return;
+    const int32 PreviousCount=AudioVoices.Num();
+    PlaySound(Sound,Position,Volume,bSpatial);
+    if(AudioVoices.Num()>PreviousCount)EnemyAudioVoices.Add(AudioVoices.Last());
+    EnemyAudioVoices.RemoveAll([](const TWeakObjectPtr<UAudioComponent>& Voice){return !Voice.IsValid();});
 }
 void ALBDirector::ApplyPreferences(bool bSave)
 {
@@ -154,7 +196,7 @@ void ALBDirector::FinishReveal()
 {
     if(Stage!=ELBStage::PowerReveal)return;
     CompletedEvents.AddUnique(TEXT("PowerReveal"));SetStage(ELBStage::Objectives);
-    if(Enemy){Enemy->State=ELBEnemyState::Patrol;Enemy->SetActorHiddenInGame(false);}
+    if(Enemy)Enemy->ResetEnemy(Enemy->GetActorTransform(),ELBEnemyState::Patrol);
     SaveCheckpoint(TEXT("C1"),PowerRespawn,FRotator(0,90,0));
     Notify(TEXT("교무실에서 방송 장치의 사용법을 확인하자。"),5);
 }
@@ -216,8 +258,8 @@ void ALBDirector::OnPuzzleSolved(FName Id)
     if(bPowerPuzzle)
     {
         bPower=true;SetStage(ELBStage::PowerReveal);RefreshWorld();
-        if(Enemy){Enemy->SetActorHiddenInGame(false);Enemy->State=ELBEnemyState::Inactive;}
-        PlaySound(Settings->Warning,EnemyStart,.6f);Notify(TEXT("전력이 복구되었다. 복도에서 소리가 들린다。"),4);
+        if(Enemy){Enemy->SetActorHiddenInGame(!IsDebugEnemyEnabled());Enemy->State=ELBEnemyState::Inactive;}
+        PlayEnemySound(Settings->Warning,EnemyStart,.6f);Notify(TEXT("전력이 복구되었다. 복도에서 소리가 들린다。"),4);
     }
     else
     {

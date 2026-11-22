@@ -94,8 +94,9 @@ ALBPlayer::ALBPlayer()
     Flashlight = CreateDefaultSubobject<USpotLightComponent>(TEXT("Flashlight"));
     Flashlight->SetupAttachment(GetFirstPersonCameraComponent());
     Flashlight->SetRelativeLocation(FVector(15,12,-10));
-    Flashlight->SetIntensity(100); Flashlight->SetAttenuationRadius(1800);
-    Flashlight->SetInnerConeAngle(17); Flashlight->SetOuterConeAngle(32);
+    // Keep unpowered classrooms readable with a brighter, wider player beam.
+    Flashlight->SetIntensity(6000); Flashlight->SetAttenuationRadius(2200);
+    Flashlight->SetInnerConeAngle(22); Flashlight->SetOuterConeAngle(40);
     Flashlight->SetLightColor(FLinearColor(.82f,.87f,1.f));
     Flashlight->SetCastShadows(true);
 }
@@ -305,12 +306,14 @@ void ALBEnemy::BeginFinalChase()
     State=ELBEnemyState::FinalChase;
     LastSeen=Target;LostSight=0;Wait=0;Repath=0;Route.Reset();RouteIndex=0;
     SetActorHiddenInGame(false);
-    Director->PlaySound(Director->Settings->Warning,GetActorLocation(),1.f,false);
+    Director->PlayEnemySound(Director->Settings->Warning,GetActorLocation(),1.f,false);
 }
 void ALBEnemy::ResetEnemy(const FTransform& Transform,ELBEnemyState NewState)
 {
+    if(Director&&!Director->IsDebugEnemyEnabled())NewState=ELBEnemyState::Inactive;
     SetActorTransform(Transform); State=NewState; Target=GetActorLocation();
-    bSeesPlayer=false; Wait=0; LostSight=0; Repath=0; Route.Reset(); RouteIndex=0; LastSoundTime=-1000; LastSoundPriority=0;
+    bSeesPlayer=false; Wait=0; LostSight=0; Repath=0; StepTime=0; Route.Reset(); RouteIndex=0; LastSoundTime=-1000; LastSoundPriority=0;
+    SetActorEnableCollision(NewState!=ELBEnemyState::Inactive);
     SetActorHiddenInGame(NewState==ELBEnemyState::Inactive);
 }
 void ALBEnemy::MoveAlongRoute(float DT,float Speed)
@@ -336,7 +339,7 @@ void ALBEnemy::MoveAlongRoute(float DT,float Speed)
         float Bob=FMath::Sin(GetWorld()->TimeSeconds*6.f)*1.7f;
         BodyRoot->SetRelativeScale3D(FVector(1,1,1.f+Bob*.001f));
         StepTime-=DT;
-        if(StepTime<=0) {StepTime=(State==ELBEnemyState::Chase||State==ELBEnemyState::FinalChase)?.4f:.7f;Director->PlaySound(Director->Settings->Footstep,GetActorLocation(),.85f);}
+        if(StepTime<=0) {StepTime=(State==ELBEnemyState::Chase||State==ELBEnemyState::FinalChase)?.4f:.7f;Director->PlayEnemySound(Director->Settings->Footstep,GetActorLocation(),.85f);}
     }
     else {Repath=0;}
 }
@@ -357,7 +360,7 @@ void ALBEnemy::Tick(float DT)
     }
     else if(bSeesPlayer)
     {
-        if(State!=ELBEnemyState::Chase){Wait=1.f;Director->PlaySound(S->Warning,GetActorLocation(),1.f,false);}
+        if(State!=ELBEnemyState::Chase){Wait=1.f;Director->PlayEnemySound(S->Warning,GetActorLocation(),1.f,false);}
         State=ELBEnemyState::Chase; LostSight=0; LastSeen=Director->Player->GetActorLocation(); Target=LastSeen;
     }
     else if(State==ELBEnemyState::Chase)

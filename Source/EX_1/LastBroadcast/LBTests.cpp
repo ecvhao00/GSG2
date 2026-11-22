@@ -6,6 +6,7 @@
 #include "Misc/Paths.h"
 #include "HAL/FileManager.h"
 #include "Components/StaticMeshComponent.h"
+#include "GameFramework/PlayerInput.h"
 
 void ALBDirector::RunFunctionalTests()
 {
@@ -141,6 +142,70 @@ void ALBDirector::RunFunctionalTests()
     }
     ResetMid();OnPuzzleSolved(TEXT("MID_A"));ULBCheckpoint* Saved=Checkpoint;Checkpoint=nullptr;ContinueGame();
     Check(TEXT("21.disk_checkpoint_round_trip"),Checkpoint&&Checkpoint!=Saved&&Solved.Contains(TEXT("MID_A"))&&bPower);
+
+    // Debug suppression must survive every normal activation path, without
+    // bypassing progression gates or changing the saved gameplay state.
+    bDebug=false;SetDebugEnemyEnabled(false);
+    Check(TEXT("26.enemy_toggle_requires_debug_mode"),IsDebugEnemyEnabled());
+    bDebug=true;SetDebugEnemyEnabled(false);
+    const FVector DisabledLocation=Enemy->GetActorLocation(),DisabledTarget=Enemy->Target;
+    Player->SetActorLocation(DisabledLocation+FVector(0,0,96));Grace=0;
+    Enemy->Hear(FVector(1900,1200,0),99,GetWorld()->TimeSeconds+1000);
+    Enemy->Tick(10.f);Capture();
+    Check(TEXT("27.disabled_enemy_cannot_move_see_hear_or_capture"),!IsEnemyActive()&&!bCaptured&&!Enemy->HasSight()&&Enemy->State==ELBEnemyState::Inactive&&Enemy->IsHidden()&&!Enemy->GetActorEnableCollision()&&Enemy->GetRoute().IsEmpty()&&Enemy->GetActorLocation().Equals(DisabledLocation,.1f)&&Enemy->Target.Equals(DisabledTarget,.1f));
+    ALBController* DebugController=Cast<ALBController>(Player->Controller);
+    Check(TEXT("28b.engine_exec_bindings_cannot_consume_enemy_toggle_key"),DebugController&&DebugController->PlayerInput&&!DebugController->PlayerInput->DebugExecBindings.ContainsByPredicate([](const FKeyBind& Binding){return Binding.Key==EKeys::F9;}));
+    bDebug=false;
+    if(DebugController){DebugController->EnemyDebugKey();DebugController->LBEnemy(1);}
+    Check(TEXT("28.hidden_debug_panel_blocks_key_and_console_changes"),DebugController&&!IsDebugEnemyEnabled());
+    bDebug=true;SetMenu(TEXT("Pause"));
+    if(DebugController)DebugController->EnemyDebugKey();
+    Check(TEXT("29.toggle_works_while_paused_without_resuming_game"),IsDebugEnemyEnabled()&&UGameplayStatics::IsGamePaused(this)&&Menu==TEXT("Pause")&&Grace>=1.f);
+    if(DebugController)DebugController->LBEnemy(0);
+    Check(TEXT("29b.console_can_disable_while_paused"),!IsDebugEnemyEnabled()&&UGameplayStatics::IsGamePaused(this));
+    if(DebugController)DebugController->LBEnemy(2);
+    Check(TEXT("29c.invalid_console_value_keeps_current_state"),!IsDebugEnemyEnabled());
+
+    StartNewGame();BeginEntrance();StageTime=1.1f;SkipCinematic();OnPuzzleSolved(TEXT("P01"));
+    Check(TEXT("30.power_reveal_respects_enemy_off"),bPower&&Stage==ELBStage::PowerReveal&&!IsDebugEnemyEnabled()&&Enemy->IsHidden());
+    Tick(Settings->RevealTime+.01f);
+    Check(TEXT("30b.reveal_completion_cannot_reactivate_disabled_enemy"),Stage==ELBStage::Objectives&&Checkpoint->CheckpointId==TEXT("C1")&&Enemy->State==ELBEnemyState::Inactive&&Enemy->IsHidden());
+    bool bAllDebugBroadcasts=true;
+    for(FName Zone:{FName(TEXT("Z01")),FName(TEXT("Z02")),FName(TEXT("Z03"))})
+    {
+        bAllDebugBroadcasts=TryStartBroadcast(Zone,Reason)&&bAllDebugBroadcasts;
+        Tick(1.f);bAllDebugBroadcasts=bAllDebugBroadcasts&&Cooldown>0&&Cooldown<Settings->RadioCooldown;
+        Tick(Settings->RadioCooldown);
+    }
+    Check(TEXT("31.all_broadcast_zones_and_cooldown_work_with_enemy_off"),bAllDebugBroadcasts&&!IsDebugEnemyEnabled()&&Enemy->State==ELBEnemyState::Inactive&&Enemy->IsHidden());
+    CompleteMid();OpenExit();Enemy->Tick(.1f);
+    Check(TEXT("32.exit_opens_without_reactivating_disabled_enemy"),bExit&&AllObjectivesComplete()&&Stage==ELBStage::Escape&&Checkpoint->CheckpointId==TEXT("C3")&&Enemy->State==ELBEnemyState::Inactive&&Enemy->IsHidden());
+    RestoreCheckpoint();
+    Check(TEXT("33.C3_retry_preserves_enemy_off"),Stage==ELBStage::Escape&&bExit&&!IsDebugEnemyEnabled()&&Enemy->State==ELBEnemyState::Inactive&&Enemy->IsHidden());
+    Checkpoint=nullptr;const bool bDebugContinued=ContinueGame();
+    Check(TEXT("33b.disk_continue_preserves_session_override"),bDebugContinued&&Stage==ELBStage::Escape&&!IsDebugEnemyEnabled()&&Enemy->IsHidden());
+    const FVector BeforeDebugResume=Enemy->GetActorLocation();
+    if(DebugController)DebugController->LBEnemy(1);
+    Enemy->Tick(.25f);
+    Check(TEXT("34.reenable_final_chase_keeps_position_and_grants_grace"),IsDebugEnemyEnabled()&&Enemy->State==ELBEnemyState::FinalChase&&!Enemy->IsHidden()&&Enemy->GetActorEnableCollision()&&Enemy->Target.Equals(Player->GetActorLocation(),.1f)&&Grace>=1.f&&Enemy->GetActorLocation().Equals(BeforeDebugResume,.1f));
+    Tick(1.01f);for(int I=0;I<5;++I)Enemy->Tick(.05f);
+    Check(TEXT("34b.reenabled_final_chase_moves_after_grace"),Enemy->State==ELBEnemyState::FinalChase&&FVector::Dist2D(BeforeDebugResume,Enemy->GetActorLocation())>1);
+    SetDebugEnemyEnabled(false);Player->SetActorLocation(FVector(1700,2140,96));Tick(.1f);Capture();
+    Check(TEXT("35.enemy_off_run_reaches_escape_ending"),bSucceeded&&!bCaptured&&Stage==ELBStage::Ending);
+    SetDebugEnemyEnabled(true);Enemy->Tick(.1f);
+    Check(TEXT("35b.reenabling_after_success_does_not_resurrect_enemy"),Enemy->IsHidden()&&!IsEnemyActive()&&!bCaptured);
+    Tick(Settings->EndingTime+.1f);
+    Check(TEXT("35c.enemy_off_run_reaches_complete_menu"),Stage==ELBStage::Complete&&Menu==TEXT("Complete"));
+    SetDebugEnemyEnabled(false);StartNewGame();
+    Check(TEXT("36.new_game_preserves_session_override"),Stage==ELBStage::Outside&&!IsDebugEnemyEnabled()&&Enemy->IsHidden());
+    SetDebugEnemyEnabled(true);
+    Check(TEXT("36b.reenable_before_power_does_not_spawn_enemy_early"),IsDebugEnemyEnabled()&&!IsEnemyActive()&&Enemy->State==ELBEnemyState::Inactive&&Enemy->IsHidden());
+    ResetMid();const FVector BeforeNormalResume=Enemy->GetActorLocation();
+    SetDebugEnemyEnabled(false);SetDebugEnemyEnabled(true);
+    Check(TEXT("37.normal_reenable_resumes_patrol_at_current_position"),Enemy->State==ELBEnemyState::Patrol&&!Enemy->IsHidden()&&Enemy->GetActorLocation().Equals(BeforeNormalResume,.1f)&&Grace>=1.f);
+    Grace=0;Capture();SetDebugEnemyEnabled(false);SetDebugEnemyEnabled(true);
+    Check(TEXT("38.reenable_cannot_cancel_captured_result"),bCaptured&&!IsEnemyActive()&&Enemy->IsHidden());
+    bDebug=false;
     UGameplayStatics::DeleteGameInSlot(SaveSlot,0);
     Report.RemoveFromEnd(TEXT(",\n"));Report+=FString::Printf(TEXT("\n  ],\n  \"passed\":%d,\n  \"failed\":%d\n}\n"),Passed,Failed);
     FString Dir=FPaths::ProjectSavedDir()/TEXT("LastBroadcast");IFileManager::Get().MakeDirectory(*Dir,true);

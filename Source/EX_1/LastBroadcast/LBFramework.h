@@ -276,6 +276,9 @@ public:
     void ResetAudio();
     bool IsGameplay() const;
     bool IsEnemyActive() const;
+    bool IsDebugEnemyEnabled() const;
+    void SetDebugEnemyEnabled(bool bEnabled);
+    void PlayEnemySound(USoundBase* Sound, FVector Position, float Volume = 1.f, bool bSpatial = true);
     void RunFunctionalTests();
     float CaptureFade() const { return FMath::Clamp(FailureTime,0.f,1.f); }
 protected:
@@ -284,6 +287,9 @@ protected:
     bool bIntroVoicePlayed = false, bEndView = false;
     bool bIntroLightsCut = false;
     int32 PlaybackIndex = 0;
+    // Session-only debug override; never written to checkpoints or preferences.
+    bool bDebugEnemyDisabled = false;
+    TArray<TWeakObjectPtr<UAudioComponent>> EnemyAudioVoices;
     void FinishIntro();
     void FinishReveal();
     void FinishEnding();
@@ -301,7 +307,8 @@ public:
     UFUNCTION(Exec) void LBTeleport(FName LocationId);
     UFUNCTION(Exec) void LBWalk(float Seconds);
     UFUNCTION(Exec) void LBPhoto(const FString& Name);
-    void EscapeKey(); void EnterKey(); void SpaceKey(); void DebugKey();
+    UFUNCTION(Exec) void LBEnemy(int32 Enabled);
+    void EscapeKey(); void EnterKey(); void SpaceKey(); void DebugKey(); void EnemyDebugKey();
     ALBDirector* Director() const;
 };
 
