@@ -335,3 +335,25 @@ class EX_1_API ALBGameMode : public AGameModeBase
 public:
     ALBGameMode();
 };
+struct FLBPuzzleRuntime
+{
+    bool P01_Nodes[5] = { false, false, false, false, false };
+
+    bool MIDA_Selected[5] = { false, false, false, false, false };
+    int32 MIDA_MaxValue = 60;
+
+    int32 MIDB_Grid[4][4] = {
+        { 0, 0, 1, 0 },
+        { 1, 0, 0, 0 },
+        { 0, 0, 1, 2 },
+        { 1, 0, 0, 3 }
+    };
+    bool MIDB_Visited[4][4] = {};
+    TArray<FIntPoint> MIDB_PathStack;
+
+    void Reset(FName PuzzleId);
+    int32 ComputeKnapsackDP() const;
+    bool CheckBacktrackSolvable(int32 R, int32 C, bool Vis[4][4]) const;
+};
+
+extern FLBPuzzleRuntime GPuzzleRuntime;
